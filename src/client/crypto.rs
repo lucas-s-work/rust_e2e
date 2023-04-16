@@ -1,41 +1,11 @@
-use sha256::digest;
-use std::string::FromUtf8Error;
-
+use anyhow::{bail, Result};
 use openssl::{
-    error,
     pkey::{Private, Public},
     rsa::{Padding, Rsa},
 };
+use sha256::digest;
 
-use base64::{engine::general_purpose, DecodeError, Engine as _};
-
-#[derive(Debug)]
-pub enum KeyPairError {
-    ModeError(String),
-    OpenSSLError(openssl::error::ErrorStack),
-    Base64Error(DecodeError),
-    Utf8Error(FromUtf8Error),
-    VerifyError,
-    NoKeyError(String),
-}
-
-impl From<FromUtf8Error> for KeyPairError {
-    fn from(value: FromUtf8Error) -> Self {
-        KeyPairError::Utf8Error(value)
-    }
-}
-
-impl From<DecodeError> for KeyPairError {
-    fn from(value: DecodeError) -> Self {
-        KeyPairError::Base64Error(value)
-    }
-}
-
-impl From<error::ErrorStack> for KeyPairError {
-    fn from(value: error::ErrorStack) -> Self {
-        KeyPairError::OpenSSLError(value)
-    }
-}
+use base64::{engine::general_purpose, Engine as _};
 
 #[derive(Debug)]
 pub enum Mode {
@@ -53,25 +23,21 @@ pub struct KeyPair {
 }
 
 impl KeyPair {
-    fn can_encrypt(&self) -> Result<&Rsa<Public>, KeyPairError> {
+    fn can_encrypt(&self) -> Result<&Rsa<Public>> {
         match self.mode {
             Mode::Encrypt | Mode::EncryptDecrypt => Ok(self.public.as_ref().unwrap()),
-            _ => Err(KeyPairError::ModeError(String::from(
-                "cannot encrypt with non encrypt mode key",
-            ))),
+            _ => bail!("cannot use non encryption key for encrypt"),
         }
     }
 
-    fn can_decrypt(&self) -> Result<&Rsa<Private>, KeyPairError> {
+    fn can_decrypt(&self) -> Result<&Rsa<Private>> {
         match self.mode {
             Mode::EncryptDecrypt => Ok(self.private.as_ref().unwrap()),
-            _ => Err(KeyPairError::ModeError(String::from(
-                "cannot decrypt with non decrypt mode key",
-            ))),
+            _ => bail!("cannot decrypt with non decrypt mode key"),
         }
     }
 
-    pub fn encrypt(&self, msg: &str) -> Result<String, KeyPairError> {
+    pub fn encrypt(&self, msg: &str) -> Result<String> {
         let key = self.can_encrypt()?;
 
         let mut buf = vec![0; key.size() as usize];
@@ -80,7 +46,7 @@ impl KeyPair {
         Ok(buf_b64)
     }
 
-    pub fn decrypt(&self, enc_msg_str: &str) -> Result<String, KeyPairError> {
+    pub fn decrypt(&self, enc_msg_str: &str) -> Result<String> {
         let key = self.can_decrypt()?;
 
         let enc_msg = general_purpose::STANDARD_NO_PAD.decode(enc_msg_str)?;
@@ -101,25 +67,21 @@ impl KeyPair {
         Ok(decrypted_str.trim().to_string())
     }
 
-    fn can_sign(&self) -> Result<&Rsa<Private>, KeyPairError> {
+    fn can_sign(&self) -> Result<&Rsa<Private>> {
         match self.mode {
             Mode::VerifySign => Ok(self.private.as_ref().unwrap()),
-            _ => Err(KeyPairError::ModeError(String::from(
-                "cannot sign with non signing mode key",
-            ))),
+            _ => bail!("cannot sign with non signing mode key"),
         }
     }
 
-    fn can_verify(&self) -> Result<&Rsa<Public>, KeyPairError> {
+    fn can_verify(&self) -> Result<&Rsa<Public>> {
         match self.mode {
             Mode::VerifySign | Mode::Verify => Ok(self.public.as_ref().unwrap()),
-            _ => Err(KeyPairError::ModeError(String::from(
-                "cannot verify with non verify mode key",
-            ))),
+            _ => bail!("cannot verify with non verify mode key"),
         }
     }
 
-    pub fn sign(&self, msg: &str) -> Result<String, KeyPairError> {
+    pub fn sign(&self, msg: &str) -> Result<String> {
         let key = self.can_sign()?;
 
         let mut buf = vec![0; key.size() as usize];
@@ -130,7 +92,7 @@ impl KeyPair {
         Ok(buf_64)
     }
 
-    pub fn verify(&self, msg: &str, sig: &str) -> Result<(), KeyPairError> {
+    pub fn verify(&self, msg: &str, sig: &str) -> Result<()> {
         let key = self.can_verify()?;
 
         let mut buf = vec![0; key.size() as usize];
@@ -140,11 +102,11 @@ impl KeyPair {
         if hash_msg == String::from_utf8(buf)? {
             Ok(())
         } else {
-            Err(KeyPairError::VerifyError)
+            bail!("failed to verify message")
         }
     }
 
-    pub fn generate(mode: Mode) -> Result<KeyPair, KeyPairError> {
+    pub fn generate(mode: Mode) -> Result<KeyPair> {
         let key = Rsa::generate(4096)?;
         let pub_pem = key.public_key_to_pem()?;
         let priv_pem = key.private_key_to_pem()?;
@@ -158,7 +120,7 @@ impl KeyPair {
         })
     }
 
-    pub fn to_public(&self) -> Result<KeyPair, KeyPairError> {
+    pub fn to_public(&self) -> Result<KeyPair> {
         let key = self.can_encrypt()?;
 
         Ok(KeyPair {
@@ -168,7 +130,7 @@ impl KeyPair {
         })
     }
 
-    pub fn to_verify(&self) -> Result<KeyPair, KeyPairError> {
+    pub fn to_verify(&self) -> Result<KeyPair> {
         let key = self.can_verify()?;
 
         Ok(KeyPair {
@@ -178,28 +140,24 @@ impl KeyPair {
         })
     }
 
-    pub fn pub_key_pem(&self) -> Result<String, KeyPairError> {
+    pub fn pub_key_pem(&self) -> Result<String> {
         match &self.public {
             Some(key) => {
                 let pem_bytes = key.public_key_to_pem()?;
                 let b64_key = general_purpose::STANDARD_NO_PAD.encode(pem_bytes);
                 Ok(b64_key)
             }
-            None => Err(KeyPairError::NoKeyError(String::from("No public key"))),
+            None => bail!("No public key"),
         }
     }
 
-    pub fn from_pub_pem(msg: &str, mode: Mode) -> Result<KeyPair, KeyPairError> {
+    pub fn from_pub_pem(msg: &str, mode: Mode) -> Result<KeyPair> {
         match mode {
             Mode::EncryptDecrypt => {
-                return Err(KeyPairError::ModeError(
-                    "cannot load only public key for decrypt mode".to_string(),
-                ))
+                bail!("cannot load only public key for decrypt mode")
             }
             Mode::VerifySign => {
-                return Err(KeyPairError::ModeError(
-                    "cannot load only public key for sign mode".to_string(),
-                ))
+                bail!("cannot load only public key for sign mode")
             }
             _ => (),
         };

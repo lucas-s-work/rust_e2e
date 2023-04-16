@@ -1,68 +1,52 @@
-use crate::{
-    crypto::{self, KeyPair, KeyPairError, Mode},
-    friend::Friend,
-    message::{EncryptedMessage, Message},
-};
+use anyhow::{anyhow, bail, Result};
 use chrono::Utc;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-#[derive(Debug)]
-pub enum UserError {
-    CryptoError(crypto::KeyPairError),
-    DuplicateFriend(String),
-    NoSuchFriend(String),
-    UnknownMessage(String),
-}
-
-impl From<KeyPairError> for UserError {
-    fn from(value: KeyPairError) -> Self {
-        UserError::CryptoError(value)
-    }
-}
+use super::{
+    crypto::{KeyPair, Mode},
+    friend::Friend,
+    message::{EncryptedMessage, Message},
+};
 
 #[derive(Debug)]
 pub struct User {
     id: String,
-    enc_key: crypto::KeyPair,
-    sig_key: crypto::KeyPair,
+    nickname: String,
+    enc_key: KeyPair,
+    sig_key: KeyPair,
     friends: HashMap<String, Friend>,
 }
 
 impl User {
-    pub fn new() -> Result<User, UserError> {
+    pub fn new(nickname: &str) -> Result<User> {
         let enc_key = KeyPair::generate(Mode::EncryptDecrypt)?;
         let sig_key = KeyPair::generate(Mode::VerifySign)?;
         let uuid = Uuid::new_v4();
 
         Ok(User {
             id: uuid.to_string(),
+            nickname: nickname.to_string(),
             enc_key: enc_key,
             sig_key: sig_key,
             friends: HashMap::new(),
         })
     }
 
-    pub fn add_friend(&mut self, friend: Friend) -> Result<(), UserError> {
+    pub fn add_friend(&mut self, friend: Friend) -> Result<()> {
         if self.friends.get(&friend.id).is_some() {
-            return Err(UserError::DuplicateFriend(String::from(
-                "duplicate friend added",
-            )));
+            bail!("duplicate friend added");
         };
 
         self.friends.insert(friend.id.clone(), friend);
         Ok(())
     }
 
-    pub fn create_message(
-        &self,
-        friend_id: &str,
-        msg: &str,
-    ) -> Result<EncryptedMessage, UserError> {
+    pub fn create_message(&self, friend_id: &str, msg: &str) -> Result<EncryptedMessage> {
         let friend = self
             .friends
             .get(friend_id)
-            .ok_or(UserError::NoSuchFriend(String::from("no friend with Id")))?;
+            .ok_or(anyhow!("no friend with Id"))?;
 
         let enc_msg = friend.encrypt(msg)?;
         let msg_sig = self.sig_key.sign(&enc_msg)?;
@@ -77,17 +61,15 @@ impl User {
         })
     }
 
-    pub fn receive_message(&self, enc_msg: EncryptedMessage) -> Result<Message, UserError> {
+    pub fn receive_message(&self, enc_msg: EncryptedMessage) -> Result<Message> {
         if enc_msg.target_id != self.id {
-            return Err(UserError::UnknownMessage(String::from(
-                "received message for another id",
-            )));
+            bail!("received message for another id");
         };
 
         let friend = self
             .friends
             .get(&enc_msg.source_id)
-            .ok_or(UserError::NoSuchFriend(String::from("no friend with Id")))?;
+            .ok_or(anyhow!("no friend with Id"))?;
 
         friend.verify(&enc_msg)?;
 
@@ -102,12 +84,13 @@ impl User {
         })
     }
 
-    pub fn to_friend(&self) -> Result<Friend, UserError> {
+    pub fn to_friend(&self) -> Result<Friend> {
         let enc_key = self.enc_key.to_public()?;
         let sig_key = self.sig_key.to_verify()?;
 
         Ok(Friend {
             id: self.id.clone(),
+            nickname: self.nickname.clone(),
             enc_key,
             sig_key,
         })

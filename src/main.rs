@@ -1,13 +1,10 @@
-use user::User;
+use crate::client::user::User;
 
-mod crypto;
-mod friend;
-mod message;
-mod user;
+mod client;
 
 fn main() {
-    let mut user = User::new().expect("created user");
-    let friend_user = User::new()
+    let mut user = User::new("lucas").expect("created user");
+    let friend_user = User::new("steve")
         .expect("friend created")
         .to_friend()
         .expect("became friend");
