@@ -1,6 +1,7 @@
 use crate::client::user::User;
 
 mod client;
+mod connection;
 
 fn main() {
     let mut user = User::new("lucas").expect("created user");

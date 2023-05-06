@@ -10,6 +10,7 @@ pub struct EncryptedMessage {
     pub sig: String,
 }
 
+#[derive(Debug)]
 pub struct Message {
     pub id: String,
     pub source_id: String,

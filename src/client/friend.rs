@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
@@ -7,13 +9,14 @@ pub struct Friend {
     pub nickname: String,
     pub enc_key: KeyPair,
     pub sig_key: KeyPair,
+    messages: Vec<Message>,
 }
 
 use base64::{engine::general_purpose, Engine as _};
 
 use super::{
     crypto::{KeyPair, Mode},
-    message::EncryptedMessage,
+    message::{EncryptedMessage, Message},
 };
 
 #[derive(Serialize, Deserialize)]
@@ -61,6 +64,19 @@ impl Friend {
             nickname: friendJson.nickname,
             enc_key: enc_key,
             sig_key: sig_key,
+            messages: Vec::new(),
         })
+    }
+
+    pub fn print_messages(&mut self) {
+        self.messages
+            .sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        for message in self.messages {
+            println!("{}|{}: {}", message.id, message.created_at, message.content);
+        }
+    }
+
+    pub fn add_message(&mut self, message: Message) {
+        self.messages.push(message);
     }
 }

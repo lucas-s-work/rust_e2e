@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use super::{
     crypto::{KeyPair, Mode},
-    friend::Friend,
+    friend::{self, Friend},
     message::{EncryptedMessage, Message},
 };
 
@@ -42,6 +42,20 @@ impl User {
         Ok(())
     }
 
+    pub fn get_friend_ids(&self) -> HashMap<String, String> {
+        let mut friend_ids: HashMap<String, String> = HashMap::new();
+
+        for (id, f) in &self.friends {
+            friend_ids.insert(id.to_string(), f.nickname.to_string());
+        }
+
+        friend_ids
+    }
+
+    pub fn get_friend(&self, id: &str) -> Option<&Friend> {
+        self.friends.get(id)
+    }
+
     pub fn create_message(&self, friend_id: &str, msg: &str) -> Result<EncryptedMessage> {
         let friend = self
             .friends
@@ -61,27 +75,30 @@ impl User {
         })
     }
 
-    pub fn receive_message(&self, enc_msg: EncryptedMessage) -> Result<Message> {
+    pub fn receive_message(&mut self, enc_msg: EncryptedMessage) -> Result<()> {
         if enc_msg.target_id != self.id {
             bail!("received message for another id");
         };
 
         let friend = self
             .friends
-            .get(&enc_msg.source_id)
+            .get_mut(&enc_msg.source_id)
             .ok_or(anyhow!("no friend with Id"))?;
 
         friend.verify(&enc_msg)?;
 
         let msg = self.enc_key.decrypt(&enc_msg.enc_content)?;
 
-        Ok(Message {
+        let message = Message {
             id: enc_msg.id,
             source_id: enc_msg.source_id,
             target_id: enc_msg.target_id,
             content: msg,
             created_at: enc_msg.created_at,
-        })
+        };
+
+        friend.add_message(message);
+        Ok(())
     }
 
     pub fn to_friend(&self) -> Result<Friend> {
@@ -93,6 +110,7 @@ impl User {
             nickname: self.nickname.clone(),
             enc_key,
             sig_key,
+            messages: Vec::new(),
         })
     }
 }
